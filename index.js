@@ -58,7 +58,7 @@ async function generateScript() {
 // ElevenLabs – Voice
 // ----------------------------
 async function generateVoice(text) {
-  const url = "https://api.elevenlabs.io/v1/text-to-speech/YOUR-VOICE-ID";
+  const url = "https://api.elevenlabs.io/v1/text-to-speech/S34Lf5UZYzO1wH9Swlpd";
 
   const response = await axios.post(
     url,
