@@ -119,3 +119,13 @@ const PORT = process.env.PORT || 10000;
 app.listen(PORT, () =>
   console.log(`🚀 Axel Drive Orchestrator API RUNNING on port ${PORT}`)
 );
+// --------------------------------------
+// Route de test pour vérifier que l’API répond
+// --------------------------------------
+app.get("/test", (req, res) => {
+  res.json({
+    ok: true,
+    message: "🚀 Orchestrator API is running perfectly ! Aucun souci d'authentification."
+  });
+});
+
