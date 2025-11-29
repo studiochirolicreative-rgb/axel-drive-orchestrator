@@ -1,65 +1,47 @@
 import express from "express";
+import cors from "cors";
 import axios from "axios";
 import fs from "fs";
-import path from "path";
-import cors from "cors";
 
+// ---------------------------
+// CONFIG SERVEUR
+// ---------------------------
 const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Rendre le dossier public accessible (axel.jpg, voice.mp3, etc.)
+app.use('/public', express.static('public'));
+
 const PORT = process.env.PORT || 10000;
 
-// ⭐ METS TA CLÉ ELEVENLABS ICI ⭐
-const ELEVEN_API_KEY = "sk_0aec347398de8a248d15b1a2b1bc1eb781ed85847a6d54c6";
-
-// ⭐ METS L’ID DE TA VOIX PERSONNALISÉE ⭐
-const VOICE_ID = "pFdciWgv70HofgGkAYn8";
-
-// =======================================================
-// 1️⃣ NETTOYAGE DU TEXTE POUR ÉVITER QUE LA VOIX LIT TOUT
-// =======================================================
-function cleanScript(text) {
-  return text
-    .replace(/\*\*/g, "")                // retirer markdown **
-    .replace(/\[(.*?)\]/g, "")           // retirer descriptions [Scène...]
-    .replace(/\\n/g, " ")                // retirer \n
-    .replace(/\n/g, " ")                 // retirer sauts de ligne
-    .replace(/\s+/g, " ")                // nettoyer espaces multiples
-    .trim();
-}
-
-// =======================================================
-// 2️⃣ ROUTE DE TEST
-// =======================================================
+// ---------------------------
+// ENDPOINT DE TEST
+// ---------------------------
 app.get("/test", (req, res) => {
   res.json({
     ok: true,
-    message: "🚀 Orchestrator API OK · Aucun problème d'authentification",
+    message: "🚀 Orchestrator API is running perfectly ! Aucun souci d'authentification."
   });
 });
 
-// =======================================================
-// 3️⃣ GÉNÉRATION DE SCRIPT OPENAI
-// =======================================================
+// ---------------------------
+// 1️⃣ GENERATION DE SCRIPT
+// ---------------------------
 async function generateScript(theme) {
   try {
+    const prompt = `Écris un texte court et dynamique pour une vidéo automobile, thème : "${theme}".
+    Pas de mise en scène. Pas de narration.
+    Juste un texte direct, simple et efficace.`;
+
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
       {
         model: "gpt-4o-mini",
         messages: [
-          {
-            role: "system",
-            content:
-              "Tu es Axel Drive, expert auto français. Tu écris un script court, dynamique, naturel, sans balises, sans markdown, directement prononçable."
-          },
-          {
-            role: "user",
-            content: `Thème : ${theme}. Génère un texte court pour un short 20 secondes maximum.`
-          }
+          { role: "system", content: "Tu écris des scripts dynamiques pour vidéos automobiles." },
+          { role: "user", content: prompt }
         ],
-        temperature: 0.7
       },
       {
         headers: {
@@ -69,90 +51,119 @@ async function generateScript(theme) {
       }
     );
 
-    return response.data.choices[0].message.content;
-  } catch (err) {
-    console.error("Erreur OpenAI :", err.response?.data || err.message);
-    throw new Error("Erreur lors de la génération du texte.");
+    return response.data.choices[0].message.content.trim();
+
+  } catch (error) {
+    console.error("Erreur OpenAI :", error?.response?.data || error);
+    return null;
   }
 }
 
-// =======================================================
-// 4️⃣ GÉNÉRATION AUDIO ELEVENLABS
-// =======================================================
+// ---------------------------
+// 2️⃣ GENERATION VOCALE ELEVENLABS
+// ---------------------------
 async function generateVoice(text) {
   try {
-    const cleanedText = cleanScript(text);
+    const url = `https://api.elevenlabs.io/v1/text-to-speech/${process.env.ELEVENLABS_VOICE_ID}`;
 
     const response = await axios.post(
-      `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`,
+      url,
       {
-        text: cleanedText,
+        text,
         voice_settings: {
-          stability: 0.7,
-          similarity_boost: 0.65,
-          style: 0.4,
-          use_speaker_boost: true
+          stability: 0.10,
+          similarity_boost: 0.90,
         }
       },
       {
         headers: {
-          "xi-api-key": ELEVEN_API_KEY,
-          "Content-Type": "application/json"
+          "xi-api-key": process.env.ELEVENLABS_API_KEY,
+          "Content-Type": "application/json",
         },
-        responseType: "arraybuffer"
+        responseType: "arraybuffer",
       }
     );
 
-    const filePath = path.join("voice.mp3");
-    fs.writeFileSync(filePath, response.data);
+    const audioBuffer = Buffer.from(response.data);
 
-    return filePath;
-  } catch (err) {
-    console.error("Erreur ElevenLabs :", err.response?.data || err.message);
-    throw new Error("Erreur génération voix.");
+    // Sauvegarde du fichier audio localement
+    fs.writeFileSync("./public/voice.mp3", audioBuffer);
+
+    return true;
+
+  } catch (error) {
+    console.error("Erreur ElevenLabs :", error?.response?.data || error);
+    return false;
   }
 }
 
-// =======================================================
-// 5️⃣ ROUTE PRINCIPALE : /generate
-// =======================================================
+// ---------------------------
+// ENDPOINT PRINCIPAL /generate
+// ---------------------------
 app.get("/generate", async (req, res) => {
-  const theme = req.query.theme || "test";
   try {
-    console.log("➡️ Génération script pour :", theme);
+    const theme = req.query.theme || "voiture";
+    console.log("🔧 Nouveau thème :", theme);
 
+    // 1️⃣ Script
     const script = await generateScript(theme);
-    const voiceFile = await generateVoice(script);
+    if (!script) return res.json({ ok: false, error: "Erreur création script" });
+
+    // 2️⃣ Voix
+    const voiceOK = await generateVoice(script);
+    if (!voiceOK) return res.json({ ok: false, error: "Erreur génération voix" });
 
     res.json({
       ok: true,
+      message: "Génération réussie",
       script,
-      audio: `/${voiceFile}`
+      audio: "/public/voice.mp3"
     });
+
   } catch (err) {
+    console.error("Erreur /generate :", err);
+    res.json({ ok: false, error: "Erreur interne" });
+  }
+});
+
+// ---------------------------
+// 3️⃣ GENERATION VIDEO HEYGEN
+// ---------------------------
+app.get("/short", async (req, res) => {
+  try {
+    const script = req.query.script || "Salut, c'est Axel Drive ! Bienvenue dans ce premier short test !";
+
+    const payload = {
+      avatar_id: process.env.HEYGEN_AVATAR_ID,
+      audio_url: `${process.env.BASE_URL}/public/voice.mp3`
+    };
+
+    const response = await axios.post(
+      "https://api.heygen.com/v1/video.generateLipsync",
+      payload,
+      {
+        headers: {
+          "X-API-KEY": process.env.HEYGEN_API_KEY,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
     res.json({
-      ok: false,
-      error: err.message
+      ok: true,
+      message: "🎬 Vidéo en cours de génération",
+      data: response.data
     });
+
+  } catch (err) {
+    console.error("Erreur vidéo HeyGen :", err?.response?.data || err);
+    res.json({ ok: false, error: "Erreur génération vidéo." });
   }
 });
 
-// =======================================================
-// 6️⃣ SERVIR LE MP3
-// =======================================================
-app.get("/voice.mp3", (req, res) => {
-  const filePath = path.join("voice.mp3");
-  if (fs.existsSync(filePath)) {
-    res.setHeader("Content-Type", "audio/mpeg");
-    fs.createReadStream(filePath).pipe(res);
-  } else {
-    res.status(404).send("Aucun fichier audio généré.");
-  }
-});
-
-// =======================================================
-// 7️⃣ LANCEMENT SERVEUR
-// =======================================================
+// ---------------------------
+// LANCEMENT SERVEUR
+// ---------------------------
 app.listen(PORT, () => {
-  console.log(`🚀 Axel Drive API RUNNING on port ${PORT}`);
+  console.log(`🚀 Axel Drive Orchestrator API RUNNING on port ${PORT}`);
 });
