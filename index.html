@@ -1,94 +1,56 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-    <meta charset="UTF-8">
-    <title>Axel Drive - Générateur de Shorts</title>
-    <style>
-        body {
-            background: #121212;
-            color: white;
-            font-family: Arial, sans-serif;
-            text-align: center;
-            padding-top: 50px;
-        }
-        input {
-            width: 60%;
-            padding: 10px;
-            font-size: 18px;
-            border-radius: 8px;
-            border: none;
-            margin-bottom: 20px;
-        }
-        button {
-            padding: 12px 25px;
-            background: #7a00ff;
-            color: white;
-            border: none;
-            font-size: 18px;
-            border-radius: 8px;
-            cursor: pointer;
-        }
-        button:hover {
-            background: #9f38ff;
-        }
-        #result {
-            margin-top: 40px;
-        }
-        video {
-            margin-top: 20px;
-            width: 60%;
-            border-radius: 12px;
-        }
-    </style>
+<meta charset="UTF-8" />
+<title>Axel Drive - Générateur de Shorts</title>
+<style>
+  body {
+    background: #0d0d0d;
+    color: white;
+    font-family: Arial;
+    text-align: center;
+    padding-top: 120px;
+  }
+  input {
+    width: 60%;
+    padding: 14px;
+    font-size: 18px;
+    border-radius: 6px;
+    border: none;
+    outline: none;
+    background: #222;
+    color: #ddd;
+  }
+  button {
+    margin-top: 20px;
+    padding: 14px 30px;
+    background: #a700ff;
+    border: none;
+    border-radius: 6px;
+    color: white;
+    font-size: 18px;
+    cursor: pointer;
+  }
+</style>
 </head>
+
 <body>
+  <h1>🎬 Axel Drive - Générateur de Shorts</h1>
+  <p>Entre un thème pour générer un short automatique :</p>
 
-    <h1>🎬 Axel Drive - Générateur de Shorts</h1>
-    <p>Entre un thème pour générer un short automatique :</p>
+  <input id="theme" placeholder="Ex : Le secret des turbos..." />
+  <br />
+  <button onclick="generate()">Générer le short</button>
 
-    <input id="theme" type="text" placeholder="Ex : Le secret des turbos..." />
-
-    <br>
-    <button onclick="generate()">Générer le short</button>
-
-    <div id="result"></div>
-
-    <script>
-        async function generate() {
-            const theme = document.getElementById("theme").value;
-            const resultDiv = document.getElementById("result");
-
-            if (!theme.trim()) {
-                resultDiv.innerHTML = "<p style='color:red;'>Merci d'entrer un thème.</p>";
-                return;
-            }
-
-            resultDiv.innerHTML = "<p>⏳ Génération en cours... (environ 20–40 secondes)</p>";
-
-            try {
-                const response = await fetch("https://axel-drive-orchestrator-api.onrender.com/generate", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ theme })
-                });
-
-                const data = await response.json();
-
-                if (!data.ok) {
-                    resultDiv.innerHTML = "<p style='color:red;'>❌ Erreur : " + data.error + "</p>";
-                    return;
-                }
-
-                resultDiv.innerHTML = `
-                    <h3>✅ Vidéo générée :</h3>
-                    <video controls src="${data.videoUrl}"></video>
-                    <p><a href="${data.videoUrl}" target="_blank">Télécharger la vidéo</a></p>
-                `;
-            } catch (err) {
-                resultDiv.innerHTML = "<p style='color:red;'>Erreur serveur : " + err + "</p>";
-            }
-        }
-    </script>
+<script>
+async function generate() {
+  const theme = document.getElementById("theme").value;
+  const res = await fetch("/generate?theme=" + encodeURIComponent(theme));
+  const data = await res.json();
+  console.log(data);
+  alert(JSON.stringify(data, null, 2));
+}
+</script>
 
 </body>
 </html>
