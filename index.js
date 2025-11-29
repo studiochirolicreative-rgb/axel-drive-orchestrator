@@ -3,160 +3,166 @@ import cors from "cors";
 import fetch from "node-fetch";
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
 
+// =====================================================
+// CONFIG EXPRESS
+// =====================================================
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ==========================
-//  ENV VARIABLES
-// ==========================
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// =====================================================
+// VARIABLES D’ENVIRONNEMENT
+// =====================================================
 const ELEVEN_KEY = process.env.ELEVENLABS_API_KEY;
-const OPENAI_KEY = process.env.OPENAI_API_KEY;
 const HEYGEN_KEY = process.env.HEYGEN_API_KEY;
+const HEYGEN_LOOKID = process.env.HEYGEN_LOOKID;
 
-const HEYGEN_GROUP_ID = process.env.HEYGENGROUPID;
-const HEYGEN_LOOK_ID = process.env.HEYGEN_LOOKID;
-
-const AUDIO_PATH = "./voice.mp3";
-
-// ==========================
-//  ROUTE TEST
-// ==========================
+// =====================================================
+// PAGE DE TEST
+// =====================================================
 app.get("/test", (req, res) => {
-  res.json({ ok: true, message: "🚀 Orchestrator API OK" });
+  res.json({
+    ok: true,
+    message: "🚀 Orchestrator API is running perfectly !"
+  });
 });
 
-// ==========================
-//  STEP 1 — GENERATE SCRIPT
-// ==========================
-async function generateScript(theme) {
-  const prompt = `Écris un script court (20 secondes) pour Axel Drive sur ce thème : ${theme}.`;
-
-  const result = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${OPENAI_KEY}`,
-    },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }],
-    }),
-  }).then((r) => r.json());
-
-  return result.choices[0].message.content.trim();
-}
-
-// ==========================
-//  STEP 2 — GENERATE AUDIO
-// ==========================
-async function generateAudio(text) {
-  const voiceId = "pFdciWgv70HofgGkAYn8"; // ta voix Axel Drive
-
-  const result = await fetch(
-    `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
-    {
-      method: "POST",
-      headers: {
-        "xi-api-key": ELEVEN_KEY,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        text,
-        voice_settings: { stability: 0.35, similarity_boost: 0.8 },
-      }),
-    }
-  );
-
-  const buffer = await result.arrayBuffer();
-  fs.writeFileSync(AUDIO_PATH, Buffer.from(buffer));
-  console.log("🎧 Audio généré :", AUDIO_PATH);
-
-  return AUDIO_PATH;
-}
-
-// ==========================
-//  STEP 3 — SEND AUDIO TO HEYGEN (Generate Video)
-// ==========================
-async function generateVideoWithHeyGen(scriptText, audioPath) {
-  console.log("🎬 Envoi du short à HeyGen…");
-
-  const audioData = fs.readFileSync(audioPath);
-
-  const response = await fetch("https://api.heygen.com/v1/video", {
-    method: "POST",
-    headers: {
-      "x-api-key": HEYGEN_KEY,
-    },
-    body: JSON.stringify({
-      avatar_id: HEYGEN_LOOK_ID,
-      avatar_group_id: HEYGEN_GROUP_ID,
-      script: scriptText,
-      voice: {
-        type: "upload",
-      },
-      audio_base64: Buffer.from(audioData).toString("base64"),
-      ratio: "16:9",
-      background: "auto"
-    }),
-  });
-
-  const data = await response.json();
-
-  if (!data.data || !data.data.video_id) {
-    console.log("❌ HeyGen error:", data);
-    return null;
-  }
-
-  console.log("🎥 Video ID HeyGen :", data.data.video_id);
-
-  //  Poll until video is ready:
-  let videoUrl = null;
-
-  while (!videoUrl) {
-    await new Promise((resolve) => setTimeout(resolve, 3000));
-
-    const poll = await fetch(
-      `https://api.heygen.com/v1/video/status?video_id=${data.data.video_id}`,
-      { headers: { "x-api-key": HEYGEN_KEY } }
-    ).then((r) => r.json());
-
-    if (poll.data?.video_url) {
-      videoUrl = poll.data.video_url;
-    }
-  }
-
-  return videoUrl;
-}
-
-// ==========================
-//  MAIN ROUTE — GENERATE SHORT
-// ==========================
-app.get("/short", async (req, res) => {
+// =====================================================
+// ROUTE : GENERATION AUDIO
+// =====================================================
+app.get("/generate", async (req, res) => {
   try {
-    const theme = req.query.theme || "voiture sportive";
+    const theme = req.query.theme || "présentation";
 
-    // 1️⃣ Script
-    const script = await generateScript(theme);
+    const text = `Salut à tous ! Aujourd'hui, parlons de ${theme}. 
+    Restez informés et à bientôt sur la chaîne Axel Drive !`;
 
-    // 2️⃣ Audio
-    await generateAudio(script);
+    // Requête ElevenLabs
+    const audioResponse = await fetch(
+      "https://api.elevenlabs.io/v1/text-to-speech/" + process.env.ELEVENLABS_VOICE_ID,
+      {
+        method: "POST",
+        headers: {
+          "xi-api-key": ELEVEN_KEY,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          text,
+          model_id: "eleven_multilingual_v2",
+          voice_settings: { stability: 0.20, similarity_boost: 0.55 }
+        })
+      }
+    );
 
-    // 3️⃣ Vidéo HeyGen
-    const videoUrl = await generateVideoWithHeyGen(script, AUDIO_PATH);
+    if (!audioResponse.ok) {
+      return res.json({ ok: false, error: "Erreur génération voix." });
+    }
+
+    const arrayBuffer = await audioResponse.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    const filePath = path.join(__dirname, "voice.mp3");
+
+    fs.writeFileSync(filePath, buffer);
 
     res.json({
       ok: true,
-      script,
-      videoUrl,
+      script: text,
+      audio: "/voice.mp3"
     });
+
   } catch (err) {
-    console.error("❌ ERROR /short :", err);
-    res.json({ ok: false, error: err.message });
+    console.error(err);
+    res.json({ ok: false, error: "Erreur serveur." });
   }
 });
 
-// ==========================
+// =====================================================
+// ROUTE : SERVIR LE MP3
+// =====================================================
+app.get("/voice.mp3", (req, res) => {
+  const filePath = path.join(__dirname, "voice.mp3");
+  res.sendFile(filePath);
+});
 
-app.listen(10000, () => console.log("🚀 Axel Drive Orchestrator ONLINE"));
+// =====================================================
+// ROUTE : GENERATION VIDEO (HEYGEN)
+// =====================================================
+app.get("/video", async (req, res) => {
+  try {
+    const theme = req.query.theme || "test";
+
+    const script = `Salut les amis, aujourd'hui on parle de ${theme}. C'est Axel Drive !`;
+
+    // ===== CRÉATION DE LA VIDEO =====
+    const createVideo = await fetch("https://api.heygen.com/v1/video.create", {
+      method: "POST",
+      headers: {
+        "X-API-Key": HEYGEN_KEY,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        avatar: {
+          type: "LOOKALIKE",
+          look_id: HEYGEN_LOOKID
+        },
+        script: {
+          type: "text",
+          input: script,
+          voice_id: "4bd082d4a82b49e197db8ce79a3d372f" // voix par défaut HeyGen FR
+        }
+      })
+    });
+
+    const createData = await createVideo.json();
+
+    if (!createData.data || !createData.data.video_id) {
+      return res.json({ ok: false, error: "Erreur création vidéo." });
+    }
+
+    const video_id = createData.data.video_id;
+
+    // ===== POLLING POUR RÉCUPÉRER L’URL =====
+    let status = "";
+    let url = "";
+
+    while (status !== "completed") {
+      await new Promise(r => setTimeout(r, 4000));
+
+      const check = await fetch(
+        `https://api.heygen.com/v1/video.status?video_id=${video_id}`,
+        {
+          headers: { "X-API-Key": HEYGEN_KEY }
+        }
+      );
+
+      const statusData = await check.json();
+      status = statusData.data.status;
+
+      if (status === "completed") {
+        url = statusData.data.video_url;
+      }
+    }
+
+    res.json({
+      ok: true,
+      message: "Vidéo générée",
+      video: url
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.json({ ok: false, error: "Erreur HeyGen." });
+  }
+});
+
+// =====================================================
+// LANCEMENT SERVEUR
+// =====================================================
+app.listen(10000, () => {
+  console.log("🚀 Axel Drive Orchestrator API RUNNING on port 10000");
+});
