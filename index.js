@@ -1,44 +1,23 @@
+// ------------------------------------------------------
+// Axel Drive Orchestrator – Version stable Render
+// ------------------------------------------------------
+
 import axios from "axios";
 import fs from "fs";
 import FormData from "form-data";
 
-// Récupération des clés Render
+// ------------------------------------------------------
+// Chargement des clés Render
+// ------------------------------------------------------
 const openaiKey = process.env.OPENAI_API_KEY;
 const elevenKey = process.env.ELEVENLABS_API_KEY;
 const heygenKey = process.env.HEYGEN_API_KEY;
 
-// MAIN ORCHESTRATOR
-async function generateAxelDriveVideo() {
-  try {
-    console.log("Axel Drive Orchestrator is running...\n");
-
-    // 1) Génération du script OpenAI
-    console.log("Generating script...");
-    const script = await generateScript();
-    console.log("SCRIPT:", script);
-
-    // 2) Génération de la voix ElevenLabs
-    console.log("Generating AI voice...");
-    const audioPath = await generateVoice(script);
-    console.log("Audio generated at:", audioPath);
-
-    // 3) Génération de la vidéo HeyGen
-    console.log("Generating HeyGen video...");
-    const videoUrl = await generateVideo(audioPath, script);
-
-    console.log("\nFINAL VIDEO URL:", videoUrl);
-    return videoUrl;
-
-  } catch (err) {
-    console.error("❌ ERROR:", err);
-  }
-}
-
-// ----------------------------
-// OpenAI – Script Axel Drive
-// ----------------------------
+// ------------------------------------------------------
+// 1) OpenAI – Génération du script Axel Drive
+// ------------------------------------------------------
 async function generateScript() {
-  const prompt = "Écris un script court (20 secondes) pour un short Axel Drive sur un secret automobile que personne ne connaît.";
+  const prompt = `Écris un script court (20 secondes) pour un short Axel Drive sur un secret automobile que personne ne connaît.`;
 
   const response = await axios.post(
     "https://api.openai.com/v1/chat/completions",
@@ -47,22 +26,31 @@ async function generateScript() {
       messages: [{ role: "user", content: prompt }]
     },
     {
-      headers: { Authorization: `Bearer ${openaiKey}` }
+      headers: {
+        "Authorization": `Bearer ${openaiKey}`,
+        "Content-Type": "application/json"
+      }
     }
   );
 
   return response.data.choices[0].message.content;
 }
 
-// ----------------------------
-// ElevenLabs – Voice
-// ----------------------------
+// ------------------------------------------------------
+// 2) ElevenLabs – Génération de la voix (modèle sk-)
+// ------------------------------------------------------
 async function generateVoice(text) {
   const url = "https://api.elevenlabs.io/v1/text-to-speech/S34Lf5UZYzO1wH9Swlpd";
 
   const response = await axios.post(
     url,
-    { text },
+    {
+      text: text,
+      voice_settings: {
+        stability: 0.5,
+        similarity_boost: 0.75
+      }
+    },
     {
       headers: {
         "xi-api-key": elevenKey,
@@ -72,32 +60,61 @@ async function generateVoice(text) {
     }
   );
 
-  const output = "voice.mp3";
-  fs.writeFileSync(output, response.data);
+  const audioBuffer = Buffer.from(response.data);
+  const outputPath = "./voice.mp3";
+  fs.writeFileSync(outputPath, audioBuffer);
 
-  return output;
+  console.log("Audio généré :", outputPath);
+  return outputPath;
 }
 
-// ----------------------------
-// HeyGen – Video
-// ----------------------------
+// ------------------------------------------------------
+// 3) HeyGen – Génération de la vidéo avec avatar Axel
+// ------------------------------------------------------
 async function generateVideo(audioPath, scriptText) {
-  const url = "https://api.heygen.com/v1/video/generate";
+  const url = "https://api.heygen.com/v2/video/generate";
 
   const form = new FormData();
-  form.append("audio", fs.createReadStream(audioPath));
-  form.append("script", scriptText);
-  form.append("avatar_id", "YOUR-AXEL-DRIVE-AVATAR-ID");
+  form.append("audio_file", fs.createReadStream(audioPath));
+  form.append("avatar_id", "axel_drive_01"); // TON AVATAR
+  form.append("text", scriptText);
 
   const response = await axios.post(url, form, {
     headers: {
       ...form.getHeaders(),
-      "X-Api-Key": heygenKey
+      "x-api-key": heygenKey
     }
   });
 
-  return response.data.data.video_url;
+  console.log("Génération vidéo HeyGen → ID :", response.data.data.video_id);
+
+  return response.data.data.video_id;
 }
 
-// Lancer automatiquement
-generateAxelDriveVideo();
+// ------------------------------------------------------
+// 4) Orchestrateur principal
+// ------------------------------------------------------
+export default async function generateAxelDriveVideo() {
+  try {
+    console.log("Axel Drive Orchestrator is running...\n");
+
+    console.log("→ Génération du script...");
+    const script = await generateScript();
+    console.log("SCRIPT :\n", script);
+
+    console.log("\n→ Génération de la voix...");
+    const audioPath = await generateVoice(script);
+    console.log("Audio généré :", audioPath);
+
+    console.log("\n→ Génération de la vidéo...");
+    const videoId = await generateVideo(audioPath, script);
+
+    console.log("\n🎬 VIDÉO FINALE ID :", videoId);
+
+    return videoId;
+
+  } catch (err) {
+    console.error("\n❌ ERREUR :", err);
+    return { error: true, details: err.message };
+  }
+}
