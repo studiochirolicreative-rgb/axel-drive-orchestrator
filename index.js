@@ -49,46 +49,48 @@ Thème : ${theme}`;
   }
 }
 
-// -------------------------------
-// 2) Génération de la voix ElevenLabs
-// -------------------------------
+// ---------------------------------------
+//  ElevenLabs - Génération de voix (Voix Axel Drive clonée)
+// ---------------------------------------
+
 async function generateVoice(text) {
-  try {
-    const voiceId = "S34Lf5UZYzO1wH9Swlpd";  // Ta voix Axel Drive
-    const modelId = "eleven_turbo_v2";
+    const VOICE_ID = "pFdciWgv70HofgGkAYn8";  // <-- TA VOIX CLONÉE
+    const url = `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`;
 
-    const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
+    try {
+        const response = await axios.post(
+            url,
+            {
+                text: text,
+                model_id: "eleven_multilingual_v2",
+                voice_settings: {
+                    stability: 0.40,
+                    similarity_boost: 0.90
+                }
+            },
+            {
+                headers: {
+                    "xi-api-key": elevenKey,
+                    "Content-Type": "application/json"
+                },
+                responseType: "arraybuffer"
+            }
+        );
 
-    const response = await axios.post(
-      url,
-      {
-        model_id: modelId,
-        text: text,
-        voice_settings: {
-          stability: 0.4,
-          similarity_boost: 0.8
-        }
-      },
-      {
-        headers: {
-          "xi-api-key": elevenKey,
-          "Content-Type": "application/json"
-        },
-        responseType: "arraybuffer"
-      }
-    );
+        // Sauvegarde du fichier audio
+        const audioBuffer = Buffer.from(response.data);
+        const outputPath = "./voice.mp3";
+        fs.writeFileSync(outputPath, audioBuffer);
 
-    const outputPath = "./voice.mp3";
-    fs.writeFileSync(outputPath, Buffer.from(response.data));
-    return outputPath;
+        console.log("🎤 Audio généré :", outputPath);
+        return outputPath;
 
-  } catch (err) {
-    console.log("⛔ ERREUR ELEVENLABS COMPLETTE ↓↓↓↓");
-    console.log(err.response?.data?.toString() || err.message || err);
-    console.log("⛔ FIN ERREUR ELEVENLABS ↑↑↑↑");
-    return null;
-  }
+    } catch (err) {
+        console.error("❌ Erreur génération voix :", err.response?.data || err);
+        throw new Error("Erreur génération voix");
+    }
 }
+
 
 // -------------------------------
 // 3) Génération HeyGen (VIDÉO AI)
