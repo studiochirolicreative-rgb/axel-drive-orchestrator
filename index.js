@@ -11,7 +11,7 @@ app.use(express.json());
 const PORT = process.env.PORT || 10000;
 
 // ⭐ METS TA CLÉ ELEVENLABS ICI ⭐
-const ELEVEN_API_KEY = "TA_CLE_ICI";
+const ELEVEN_API_KEY = "sk_0aec347398de8a248d15b1a2b1bc1eb781ed85847a6d54c6";
 
 // ⭐ METS L’ID DE TA VOIX PERSONNALISÉE ⭐
 const VOICE_ID = "pFdciWgv70HofgGkAYn8";
