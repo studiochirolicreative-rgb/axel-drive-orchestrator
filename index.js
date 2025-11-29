@@ -1,10 +1,10 @@
-// ------------------------------------------------------
-// Axel Drive Orchestrator – Version stable Render
-// ------------------------------------------------------
-
+import express from "express";
 import axios from "axios";
 import fs from "fs";
 import FormData from "form-data";
+
+const app = express();
+app.use(express.json());
 
 // ------------------------------------------------------
 // Chargement des clés Render
@@ -27,7 +27,7 @@ async function generateScript() {
     },
     {
       headers: {
-        "Authorization": `Bearer ${openaiKey}`,
+        Authorization: `Bearer ${openaiKey}`,
         "Content-Type": "application/json"
       }
     }
@@ -37,7 +37,7 @@ async function generateScript() {
 }
 
 // ------------------------------------------------------
-// 2) ElevenLabs – Génération de la voix (modèle sk-)
+// 2) ElevenLabs – Génération de la voix
 // ------------------------------------------------------
 async function generateVoice(text) {
   const url = "https://api.elevenlabs.io/v1/text-to-speech/S34Lf5UZYzO1wH9Swlpd";
@@ -64,20 +64,19 @@ async function generateVoice(text) {
   const outputPath = "./voice.mp3";
   fs.writeFileSync(outputPath, audioBuffer);
 
-  console.log("Audio généré :", outputPath);
   return outputPath;
 }
 
 // ------------------------------------------------------
-// 3) HeyGen – Génération de la vidéo avec avatar Axel
+// 3) HeyGen – Génération vidéo
 // ------------------------------------------------------
-async function generateVideo(audioPath, scriptText) {
+async function generateVideo(audioPath, text) {
   const url = "https://api.heygen.com/v2/video/generate";
 
   const form = new FormData();
   form.append("audio_file", fs.createReadStream(audioPath));
-  form.append("avatar_id", "axel_drive_01"); // TON AVATAR
-  form.append("text", scriptText);
+  form.append("avatar_id", "axel_drive_01"); 
+  form.append("text", text);
 
   const response = await axios.post(url, form, {
     headers: {
@@ -86,35 +85,37 @@ async function generateVideo(audioPath, scriptText) {
     }
   });
 
-  console.log("Génération vidéo HeyGen → ID :", response.data.data.video_id);
-
   return response.data.data.video_id;
 }
 
 // ------------------------------------------------------
-// 4) Orchestrateur principal
+// ORCHESTRATEUR API (appelable via HTTP depuis ton agent)
 // ------------------------------------------------------
-export default async function generateAxelDriveVideo() {
+app.get("/generate", async (req, res) => {
   try {
-    console.log("Axel Drive Orchestrator is running...\n");
+    console.log("➡️ DEMARRAGE GENERATION AXEL DRIVE");
 
-    console.log("→ Génération du script...");
     const script = await generateScript();
-    console.log("SCRIPT :\n", script);
+    console.log("SCRIPT:", script);
 
-    console.log("\n→ Génération de la voix...");
     const audioPath = await generateVoice(script);
-    console.log("Audio généré :", audioPath);
+    console.log("AUDIO:", audioPath);
 
-    console.log("\n→ Génération de la vidéo...");
     const videoId = await generateVideo(audioPath, script);
+    console.log("VIDEO ID:", videoId);
 
-    console.log("\n🎬 VIDÉO FINALE ID :", videoId);
-
-    return videoId;
+    res.json({ ok: true, script, videoId });
 
   } catch (err) {
-    console.error("\n❌ ERREUR :", err);
-    return { error: true, details: err.message };
+    console.error(err);
+    res.status(500).json({ ok: false, error: err.message });
   }
-}
+});
+
+// ------------------------------------------------------
+// Lancer serveur Render
+// ------------------------------------------------------
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () =>
+  console.log(`🚀 Axel Drive Orchestrator API RUNNING on port ${PORT}`)
+);
