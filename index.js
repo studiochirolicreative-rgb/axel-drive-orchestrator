@@ -1,42 +1,22 @@
-// ----------------------------
-// Import des librairies
-// ----------------------------
 import express from "express";
 import axios from "axios";
 import fs from "fs";
 import path from "path";
-import { fileURLToPath } from "url";
+import FormData from "form-data";
 
-// ----------------------------
-// Chemins nécessaires (Render, Node)
-// ----------------------------
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// ----------------------------
-// Chargement des clés API Render
-// ----------------------------
+// Load env keys on Render
 const openaiKey = process.env.OPENAI_API_KEY;
-const elevenLabsKey = process.env.ELEVENLABS_API_KEY; 
+const elevenKey = process.env.ELEVENLABS_API_KEY;
 const heygenKey = process.env.HEYGEN_API_KEY;
 
-// ----------------------------
-// Configuration serveur Express
-// ----------------------------
 const app = express();
 app.use(express.json());
-app.use(express.static(__dirname)); // Permet d'afficher index.html, CSS, JS, images…
+app.use(express.urlencoded({ extended: true }));
+app.use(express.static("public"));
 
-// ----------------------------
-// Page d'accueil = ton interface Axel Drive
-// ----------------------------
-app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "index.html"));
-});
-
-// ----------------------------
-// Route de test (fonctionne déjà)
-// ----------------------------
+// -----------------------------
+//  ROUTE TEST
+// -----------------------------
 app.get("/test", (req, res) => {
   res.json({
     ok: true,
@@ -44,47 +24,51 @@ app.get("/test", (req, res) => {
   });
 });
 
-// ----------------------------
-// Génération du script via OpenAI
-// ----------------------------
-async function generateScript() {
+// -----------------------------
+//  OPENAI — Génération du script Axel Drive
+// -----------------------------
+async function generateScript(theme) {
   try {
+    const prompt = `Écris un script très court (20 secondes) pour un short Axel Drive basé sur ce thème : ${theme}`;
+
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
       {
         model: "gpt-4o-mini",
         messages: [
-          {
-            role: "user",
-            content: "Écris un script court (20 secondes) pour un short Axel Drive sur un secret automobile que personne ne connaît."
-          }
+          { role: "user", content: prompt }
         ]
       },
       {
         headers: {
-          Authorization: `Bearer ${openaiKey}`
+          Authorization: `Bearer ${openaiKey}`,
+          "Content-Type": "application/json"
         }
       }
     );
 
     return response.data.choices[0].message.content;
   } catch (err) {
-    console.error("❌ ERREUR SCRIPT :", err.response?.data || err);
+    console.log("Erreur script OpenAI :", err);
     return null;
   }
 }
 
-// ----------------------------
-// Génération voix ElevenLabs (clé sk-)
-// ----------------------------
+// -----------------------------
+//  ELEVENLABS — Nouvelle API Projects (clé SK)
+// -----------------------------
 async function generateVoice(text) {
   try {
-    const url = "https://api.elevenlabs.io/v1/text-to-speech/S34Lf5UZYzO1wH9Swlpd";
+    const voiceId = "S34Lf5UZYzO1wH9Swlpd"; // ta voix AxelDrive
+    const modelId = "eleven_turbo_v2";      // modèle voix moderne
+
+    const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
 
     const response = await axios.post(
       url,
       {
-        text,
+        model_id: modelId,
+        text: text,
         voice_settings: {
           stability: 0.4,
           similarity_boost: 0.8
@@ -92,82 +76,67 @@ async function generateVoice(text) {
       },
       {
         headers: {
-          "xi-api-key": elevenLabsKey,
+          "xi-api-key": elevenKey,
           "Content-Type": "application/json"
         },
         responseType: "arraybuffer"
       }
     );
 
+    // Écrire le MP3
     const outputPath = "./voice.mp3";
     fs.writeFileSync(outputPath, Buffer.from(response.data));
 
     return outputPath;
+
   } catch (err) {
-    console.error("❌ ERREUR VOIX :", err.response?.data || err);
+    console.log("Erreur génération voix ElevenLabs :", err.response?.data || err);
     return null;
   }
 }
 
-// ----------------------------
-// Génération vidéo HeyGen
-// ----------------------------
-async function generateVideo(audioPath, scriptText) {
-  try {
-    const audioBuffer = fs.readFileSync(audioPath);
-
-    const response = await axios.post(
-      "https://api.heygen.com/v1/video/create",
-      {
-        text: scriptText,
-        audio_file: audioBuffer.toString("base64"),
-        avatar_id: "808459e6cc0e4cfbb4175f0fd9e61f30" // avatar par défaut
-      },
-      {
-        headers: {
-          "X-Api-Key": heygenKey,
-          "Content-Type": "application/json"
-        }
-      }
-    );
-
-    return response.data;
-  } catch (err) {
-    console.error("❌ ERREUR VIDEO :", err.response?.data || err);
-    return null;
-  }
-}
-
-// ----------------------------
-// Route principale = génération short complet
-// ----------------------------
+// -----------------------------
+//  ENDPOINT /generate
+// -----------------------------
 app.get("/generate", async (req, res) => {
   try {
-    const script = await generateScript();
-    if (!script) return res.json({ ok: false, error: "Erreur script" });
+    const theme = req.query.theme || "Un secret automobile";
+    console.log("🎬 Thème reçu :", theme);
 
+    // 1. SCRIPT
+    const script = await generateScript(theme);
+    if (!script) return res.json({ ok: false, error: "Erreur script OpenAI" });
+
+    console.log("Script généré :", script);
+
+    // 2. VOIX
     const audioPath = await generateVoice(script);
-    if (!audioPath) return res.json({ ok: false, error: "Erreur génération voix" });
+    if (!audioPath)
+      return res.json({ ok: false, error: "Erreur génération voix" });
 
-    const videoData = await generateVideo(audioPath, script);
-    if (!videoData) return res.json({ ok: false, error: "Erreur génération vidéo" });
-
-    res.json({
+    return res.json({
       ok: true,
-      script,
-      video: videoData
+      script: script,
+      audio_url: "https://axel-drive-orchestrator-api.onrender.com/voice.mp3"
     });
 
   } catch (err) {
-    console.error("❌ ERREUR GENERATE :", err);
-    return res.json({ ok: false, error: err.message });
+    console.log("ERREUR GENERATE :", err);
+    res.json({ ok: false, error: "Erreur interne serveur" });
   }
 });
 
-// ----------------------------
-// Démarrage serveur Render
-// ----------------------------
+// -----------------------------
+//  Static hosting for index.html
+// -----------------------------
+app.get("/", (req, res) => {
+  res.sendFile(path.resolve("index.html"));
+});
+
+// -----------------------------
+//  LANCEMENT SERVEUR
+// -----------------------------
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log("🚀 Axel Drive Orchestrator API RUNNING on port", PORT);
+  console.log(`🚀 Axel Drive Orchestrator API RUNNING on port ${PORT}`);
 });
