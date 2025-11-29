@@ -1,22 +1,22 @@
 import express from "express";
 import axios from "axios";
 import fs from "fs";
+import cors from "cors";
 import path from "path";
-import FormData from "form-data";
 
-// Load env keys on Render
+const app = express();
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Récupération des clés API dans Render
 const openaiKey = process.env.OPENAI_API_KEY;
 const elevenKey = process.env.ELEVENLABS_API_KEY;
 const heygenKey = process.env.HEYGEN_API_KEY;
 
-const app = express();
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(express.static("public"));
-
-// -----------------------------
-//  ROUTE TEST
-// -----------------------------
+// -------------------------------
+// ROUTE DE TEST
+// -------------------------------
 app.get("/test", (req, res) => {
   res.json({
     ok: true,
@@ -24,43 +24,38 @@ app.get("/test", (req, res) => {
   });
 });
 
-// -----------------------------
-//  OPENAI — Génération du script Axel Drive
-// -----------------------------
+// -------------------------------
+// 1) Génération du script OpenAI
+// -------------------------------
 async function generateScript(theme) {
   try {
-    const prompt = `Écris un script très court (20 secondes) pour un short Axel Drive basé sur ce thème : ${theme}`;
+    const prompt = `Écris un script court (20 à 28 secondes) pour un short Axel Drive.
+Thème : ${theme}`;
 
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
       {
         model: "gpt-4o-mini",
-        messages: [
-          { role: "user", content: prompt }
-        ]
+        messages: [{ role: "user", content: prompt }]
       },
-      {
-        headers: {
-          Authorization: `Bearer ${openaiKey}`,
-          "Content-Type": "application/json"
-        }
-      }
+      { headers: { Authorization: `Bearer ${openaiKey}` } }
     );
 
     return response.data.choices[0].message.content;
+
   } catch (err) {
-    console.log("Erreur script OpenAI :", err);
+    console.log("❌ ERREUR OPENAI :", err.response?.data || err.message);
     return null;
   }
 }
 
-// -----------------------------
-//  ELEVENLABS — Nouvelle API Projects (clé SK)
-// -----------------------------
+// -------------------------------
+// 2) Génération de la voix ElevenLabs
+// -------------------------------
 async function generateVoice(text) {
   try {
-    const voiceId = "S34Lf5UZYzO1wH9Swlpd"; // ta voix AxelDrive
-    const modelId = "eleven_turbo_v2";      // modèle voix moderne
+    const voiceId = "S34Lf5UZYzO1wH9Swlpd";  // Ta voix Axel Drive
+    const modelId = "eleven_turbo_v2";
 
     const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
 
@@ -83,59 +78,74 @@ async function generateVoice(text) {
       }
     );
 
-    // Écrire le MP3
     const outputPath = "./voice.mp3";
     fs.writeFileSync(outputPath, Buffer.from(response.data));
-
     return outputPath;
 
   } catch (err) {
-    console.log("Erreur génération voix ElevenLabs :", err.response?.data || err);
+    console.log("⛔ ERREUR ELEVENLABS COMPLETTE ↓↓↓↓");
+    console.log(err.response?.data?.toString() || err.message || err);
+    console.log("⛔ FIN ERREUR ELEVENLABS ↑↑↑↑");
     return null;
   }
 }
 
-// -----------------------------
-//  ENDPOINT /generate
-// -----------------------------
-app.get("/generate", async (req, res) => {
+// -------------------------------
+// 3) Génération HeyGen (VIDÉO AI)
+// -------------------------------
+async function generateVideo(audioPath, script) {
   try {
-    const theme = req.query.theme || "Un secret automobile";
-    console.log("🎬 Thème reçu :", theme);
+    // pas encore branché, mais on laissera ici plus tard
+    return "VIDEO_NOT_IMPLEMENTED_YET";
+  } catch (err) {
+    console.log("❌ ERREUR HEYGEN :", err.response?.data || err.message);
+    return null;
+  }
+}
 
-    // 1. SCRIPT
+// -------------------------------
+// ROUTE PRINCIPALE /generate
+// -------------------------------
+app.get("/generate", async (req, res) => {
+  const theme = req.query.theme || "secret auto";
+
+  try {
+    // 1 – Script
     const script = await generateScript(theme);
-    if (!script) return res.json({ ok: false, error: "Erreur script OpenAI" });
+    if (!script) return res.json({ ok: false, error: "Erreur génération script" });
 
-    console.log("Script généré :", script);
-
-    // 2. VOIX
+    // 2 – Voix
     const audioPath = await generateVoice(script);
-    if (!audioPath)
-      return res.json({ ok: false, error: "Erreur génération voix" });
+    if (!audioPath) return res.json({ ok: false, error: "Erreur génération voix" });
+
+    // 3 – Vidéo
+    // const videoUrl = await generateVideo(audioPath, script);
 
     return res.json({
       ok: true,
-      script: script,
-      audio_url: "https://axel-drive-orchestrator-api.onrender.com/voice.mp3"
+      message: "Génération réussie",
+      script,
+      audio: "/voice.mp3"
     });
 
   } catch (err) {
-    console.log("ERREUR GENERATE :", err);
-    res.json({ ok: false, error: "Erreur interne serveur" });
+    console.log("❌ ERREUR GENERATE :", err);
+    return res.json({ ok: false, error: "Erreur serveur" });
   }
 });
 
-// -----------------------------
-//  Static hosting for index.html
-// -----------------------------
+// -------------------------------
+// GESTION DES FICHIERS STATIQUES (FRONT)
+// -------------------------------
+app.use(express.static(path.resolve("./")));
+
 app.get("/", (req, res) => {
-  res.sendFile(path.resolve("index.html"));
+  res.sendFile(path.resolve("./index.html"));
 });
 
-// -----------------------------
-//  LANCEMENT SERVEUR
-// -----------------------------
+// -------------------------------
+// LANCEMENT DU SERVEUR
+// -------------------------------
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`🚀 Axel Drive Orchestrator API RUNNING on port ${PORT}`);
