@@ -1,65 +1,66 @@
 import express from "express";
-import fetch from "node-fetch";
 import fs from "fs";
 import path from "path";
-import { fileURLToPath } from "url";
-
-// Fix pour Render (ESM)
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import fetch from "node-fetch";
+import { exec } from "child_process";
 
 const app = express();
-app.use(express.json());
+const __dirname = path.resolve();
 
-// === ENVIRONMENT KEYS ===
-const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
-const HEYGEN_API_KEY = process.env.HEYGEN_API_KEY;
-const HEYGEN_GROUPID = process.env.HEYGEN_GROUPID;
-const HEYGEN_LOOKID = process.env.HEYGEN_LOOKID;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+// -------------------------
+// CONFIG
+// -------------------------
+const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY;
+const VOICE_ID = process.env.ELEVENLABS_VOICE_ID || "pFdciWgv70HofgGkAYn8"; // Ta voix Axel Drive
 
-// =========================
-// ROUTE 1 : GENERATION SCRIPT + VOIX
-// =========================
+const IMAGE_PATH = path.join(__dirname, "axel.png"); // Ton image dans le repo
+const AUDIO_OUTPUT = path.join(__dirname, "voice.mp3");
+const VIDEO_OUTPUT = path.join(__dirname, "output.mp4");
+
+// -------------------------
+// ROUTE 1 : Générer le texte + voix
+// -------------------------
 app.get("/generate", async (req, res) => {
     try {
-        const theme = req.query.theme || "test";
+        const theme = req.query.theme || "default";
 
-        // Génération texte via OpenAI
-        const prompt = `Écris un texte très court (8 à 12 secondes) parlé par Axel Drive sur le thème : "${theme}".`;
-        const aiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+        const prompt = `Écris un texte court et dynamique pour une vidéo TikTok automobile. Thème : ${theme}.`;
+        
+        // Appel OpenAI pour générer un script
+        const gpt = await fetch("https://api.openai.com/v1/chat/completions", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
-                Authorization: `Bearer ${OPENAI_API_KEY}`
+                Authorization: `Bearer ${process.env.OPENAI_API_KEY}`
             },
             body: JSON.stringify({
                 model: "gpt-4o-mini",
                 messages: [{ role: "user", content: prompt }]
             })
-        });
+        }).then(r => r.json());
 
-        const aiData = await aiResponse.json();
-        const script = aiData.choices?.[0]?.message?.content || "Bienvenue sur Axel Drive !";
+        const script = gpt.choices?.[0]?.message?.content || "Bienvenue dans Axel Drive !";
 
-        // Génération AUDIO ElevenLabs
-        const audioResponse = await fetch("https://api.elevenlabs.io/v1/text-to-speech", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "xi-api-key": ELEVENLABS_API_KEY,
-            },
-            body: JSON.stringify({
-                text: script,
-                voice: "your-voice-id-here", // si tu veux tu peux mettre ta voix ici
-                model_id: "eleven_multilingual_v2"
-            })
-        });
+        // -------------------------
+        // Synthèse vocale ElevenLabs
+        // -------------------------
+        const tts = await fetch(
+            `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`,
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "xi-api-key": ELEVENLABS_KEY
+                },
+                body: JSON.stringify({
+                    text: script,
+                    model_id: "eleven_multilingual_v2"
+                })
+            }
+        );
 
-        const arrayBuffer = await audioResponse.arrayBuffer();
-        const audioBuffer = Buffer.from(arrayBuffer);
-
-        fs.writeFileSync(path.join(__dirname, "voice.mp3"), audioBuffer);
+        const audioBuffer = await tts.arrayBuffer();
+        fs.writeFileSync(AUDIO_OUTPUT, Buffer.from(audioBuffer));
 
         return res.json({
             ok: true,
@@ -69,101 +70,70 @@ app.get("/generate", async (req, res) => {
 
     } catch (err) {
         console.error(err);
-        return res.json({ ok: false, error: "Erreur génération voix." });
+        return res.json({ ok: false, error: "Erreur génération." });
     }
 });
 
-// Pour servir l'audio
-app.get("/voice.mp3", (req, res) => {
-    res.sendFile(path.join(__dirname, "voice.mp3"));
-});
-
-
-// =========================
-// ROUTE 2 : GENERATION VIDEO HEYGEN
-// =========================
+// -------------------------
+// ROUTE 2 : Générer la vidéo Wav2Lip
+// -------------------------
 app.get("/video", async (req, res) => {
     try {
-        const theme = req.query.theme || "test";
-
-        // 1) Appel /generate pour avoir script + audio
-        const gen = await fetch(`https://${req.headers.host}/generate?theme=${theme}`);
-        const data = await gen.json();
-
-        if (!data.ok) {
-            return res.json({ ok: false, error: "Erreur génération audio." });
+        if (!fs.existsSync(AUDIO_OUTPUT)) {
+            return res.json({ ok: false, error: "Aucun audio généré." });
         }
 
-        // 2) Upload audio vers HeyGen
-        const fileData = fs.readFileSync(path.join(__dirname, "voice.mp3"));
-        const upload = await fetch("https://api.heygen.com/v1/audio/upload", {
-            method: "POST",
-            headers: {
-                "X-Api-Key": HEYGEN_API_KEY
-            },
-            body: fileData
+        // -------------------------
+        // 1. Exécuter Wav2Lip
+        // -------------------------
+        const cmd = `
+            python3 Wav2Lip/inference.py \
+            --checkpoint_path Wav2Lip/checkpoints/wav2lip_gan.pth \
+            --face "${IMAGE_PATH}" \
+            --audio "${AUDIO_OUTPUT}" \
+            --outfile "${VIDEO_OUTPUT}"
+        `;
+
+        exec(cmd, async (error, stdout, stderr) => {
+            if (error) {
+                console.error(stderr);
+                return res.json({ ok: false, error: "Erreur Wav2Lip." });
+            }
+
+            // -------------------------
+            // 2. Convertir en format SHORT 1080×1920
+            // -------------------------
+            const shortPath = path.join(__dirname, "short.mp4");
+
+            const ffmpegCmd = `
+                ffmpeg -y -i "${VIDEO_OUTPUT}" \
+                -vf "scale=-1:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2" \
+                -c:a copy "${shortPath}"
+            `;
+
+            exec(ffmpegCmd, (err2) => {
+                if (err2) return res.json({ ok: false, error: "Erreur format final." });
+
+                return res.json({
+                    ok: true,
+                    video: "/short.mp4"
+                });
+            });
         });
-
-        const uploadData = await upload.json();
-        const audioUrl = uploadData?.data?.url;
-        if (!audioUrl) return res.json({ ok: false, error: "Impossible d'uploader voice.mp3." });
-
-        // 3) Lancer la génération vidéo
-        const videoGen = await fetch("https://api.heygen.com/v1/video/generate", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "X-Api-Key": HEYGEN_API_KEY
-            },
-            body: JSON.stringify({
-                aspect_ratio: "9:16",
-                avatar_group_id: HEYGEN_GROUPID,
-                avatar_look_id: HEYGEN_LOOKID,
-                audio_url: audioUrl
-            })
-        });
-
-        const videoData = await videoGen.json();
-        const videoId = videoData?.data?.video_id;
-        if (!videoId) return res.json({ ok: false, error: "HeyGen n’a pas généré de vidéo." });
-
-        // 4) Retourne l'ID pour aller récupérer la vidéo
-        return res.json({
-            ok: true,
-            video_id: videoId,
-            message: "Vidéo en cours de génération. Appelle /video/status? id=XXX"
-        });
-
-    } catch (err) {
-        console.log(err);
-        return res.json({ ok: false, error: "Erreur HeyGen." });
-    }
-});
-
-// =========================
-// ROUTE 3 : CHECK VIDEO STATUS
-// =========================
-app.get("/video/status", async (req, res) => {
-    try {
-        const id = req.query.id;
-        if (!id) return res.json({ ok: false, error: "id manquant." });
-
-        const status = await fetch(`https://api.heygen.com/v1/video/status?video_id=${id}`, {
-            method: "GET",
-            headers: { "X-Api-Key": HEYGEN_API_KEY }
-        });
-
-        const data = await status.json();
-        return res.json(data);
 
     } catch (err) {
         console.error(err);
-        return res.json({ ok: false, error: "Erreur statut vidéo." });
+        return res.json({ ok: false, error: "Erreur vidéo." });
     }
 });
 
-// =========================
+// -------------------------
+// FICHIERS STATIQUES
+// -------------------------
+app.use(express.static(__dirname));
 
-app.listen(10000, () => {
-    console.log("Axel Drive Orchestrator API RUNNING on port 10000");
-});
+// -------------------------
+// LANCEMENT SERVEUR
+// -------------------------
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => console.log("🚀 Axel Drive Orchestrator ONLINE sur port", PORT));
